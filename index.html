@@ -771,7 +771,7 @@ function setUnlocked(tier,code){ storeSet("cc_unlock","pro"); if(code) storeSet(
    防「一码多查/代查」；计数存在买家设备上，清缓存可重置，但卡密生成日起
    2 个日历天过期，窗口有限（已拍板接受）。换绑新卡密后名额按新卡密重新计。
    已解读过的生辰重复查看不占名额；买家看到的是「无法解读」，不暴露规则细节。 */
-var QUOTA_MAX=3, QUOTA_BLOCKED=false;
+var QUOTA_MAX=3, QUOTA_BLOCKED=false, LAST_FP=null;
 function quotaBucket(){ return "cc_charts_"+String(storeGet("cc_code")||"_").replace(/[^0-9A-Z]/g,""); }
 function birthFp(y,mo,d,h,mi){ return y+"-"+mo+"-"+d+"-"+h+"-"+mi+"-"+(gender==="f"?"f":"m"); }
 function quotaUse(fp){
@@ -825,7 +825,8 @@ function refreshGate(){
 /* mode 参数保留兼容（老链接可能带 openUnlock('try')），一律走完整版 */
 function openUnlock(mode){
   var lv=tierLevel();
-  if(lv>=1){ showToast("你已经解锁完整版了"); return; }
+  /* 超限态放行：买家需打开面板贴新卡密换绑（否则已解锁设备永远打不开输入框） */
+  if(lv>=1 && !QUOTA_BLOCKED){ showToast("你已经解锁完整版了"); return; }
   renderUnlockPanel();
   document.getElementById("uErr").textContent="";
   document.getElementById("uMask").classList.add("show");
@@ -895,9 +896,10 @@ function doUnlock(){
       if(nc && nc!==storeGet("cc_code")){
         QUOTA_BLOCKED=false;
         setUnlocked(tier,nc);
+        if(LAST_FP && !quotaUse(LAST_FP)) QUOTA_BLOCKED=true;   /* 新码名额也要扣当前屏内生辰 */
         closeUnlock();
         refreshLockUI();
-        showToast("新卡密已激活，可继续解读");
+        showToast(QUOTA_BLOCKED ? "新卡密已激活，但该生辰无法解读" : "新卡密已激活，可继续解读");
       }else{
         closeUnlock();
         showToast("你已是完整版，无需再次解锁");
@@ -906,10 +908,16 @@ function doUnlock(){
     }
     QUOTA_BLOCKED=false;
     setUnlocked(tier, normCode(v).s);
+    /* 激活瞬间补扣：未解锁时跑的盘不计名额，激活后当前屏上这张必须立即入账，
+       否则买家重查它时才扣，等于多送一次（实测抓到的漏洞） */
+    if(LAST_FP && !quotaUse(LAST_FP)) QUOTA_BLOCKED=true;
     closeUnlock();
     refreshLockUI();
-    showToast("完整版已解锁，职业方向报告已全部展开");
-    setTimeout(function(){ try{ window.scrollTo(0,0); }catch(e){} },80);
+    if(QUOTA_BLOCKED){ showToast("已超过解读次数，无法解读"); }
+    else{
+      showToast("完整版已解锁，职业方向报告已全部展开");
+      setTimeout(function(){ try{ window.scrollTo(0,0); }catch(e){} },80);
+    }
   }else{
     var s=normCode(v).s;
     err.textContent = !v ? "请先输入卡密"
@@ -929,8 +937,10 @@ function doUnlock(){
   if(ver) ver.addEventListener("click",function(){
     taps++;
     if(taps>=5){ taps=0;
+      storeDel("cc_charts_"+String(storeGet("cc_code")||"_").replace(/[^0-9A-Z]/g,""));
+      storeDel("cc_charts__");
       storeDel("cc_unlock"); storeDel("cc_code");
-      QUOTA_BLOCKED=false;
+      QUOTA_BLOCKED=false; LAST_FP=null;
       refreshLockUI();
       show("s-boot");
       showToast("已重置解锁状态，生成结果后在闸门粘贴卡密重新解锁");
@@ -1299,10 +1309,11 @@ function run(){
     comboTxt:COMBO[[mainType,subType].sort().join("")],
     paceKey:paceKey,paceName:pace.n,paceTxt:pace.t,
     dyVals:dvals};
+  LAST_FP=birthFp(y,mo,d,h,mi);
   refreshLockUI();
   /* 解读名额：已解锁设备每查一个新生辰占一个名额（精确到时辰），超限弹「无法解读」闸门 */
   if(isUnlocked()){
-    if(!quotaUse(birthFp(y,mo,d,h,mi))){ QUOTA_BLOCKED=true; show("s-card"); return; }
+    if(!quotaUse(LAST_FP)){ QUOTA_BLOCKED=true; show("s-card"); return; }
     QUOTA_BLOCKED=false;
   }
   playLoad();
